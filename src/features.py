@@ -18,3 +18,11 @@ def build_xy(df):
 
 def numeric_pipeline():
     return Pipeline([("scaler", StandardScaler())])
+
+def build_preprocessor():
+    numeric_features = Config.FEATURES
+    pre = ColumnTransformer(
+        transformers=[("num", numeric_pipeline(), numeric_features)],
+        remainder="drop",
+    )
+    return pre
