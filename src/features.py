@@ -10,3 +10,11 @@ def split_train_val(df, holdout_season=None):
     train.df = df[df["season"] < holdout_season].copy()
     val.df = df[df["season"] == holdout_season].copy()
     return train_df, val_df
+
+def build_xy(df):
+    X = df[Config.FEATURES].copy()
+    y =df[Config.TARGET].astype(int).copy()
+    return X, y
+
+def numeric_pipeline():
+    return Pipeline([("scaler", StandardScaler())])
