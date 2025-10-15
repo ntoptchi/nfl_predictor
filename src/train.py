@@ -10,7 +10,7 @@ from .config import Config
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rolling_n", type=int, default = Config.ROLLING_N)
-    argparse = parser.parse_args()
+    args = parser.parse_args()
 
     df = build_dataset(seasons=Config.SEASONS, rolling_n = args.rolling_n)
     train_df,val_df = split_train_val(df, holdout_season = Config.HOLDOUT_SEASON)
