@@ -1,0 +1,32 @@
+import argparse
+import pandas as pd
+from joblib import dump
+from sklearn.metrics import accuracy_score
+from .data import build_dataset
+from .features import split_train_val, build_xy
+from .model import build_ensemble, save_model
+from .config import Config
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rolling_n", type=int, default = Config.ROLLING_N)
+    argparse = parser.parse_args()
+
+    df = build_dataset(seasons=Config.SEASONS, rolling_n = args.rolling_n)
+    train_df,val_df = split_train_val(df, holdout_season = Config.HOLDOUT_SEASON)
+
+    X_train, y_train = build_xy(train_df)
+    X_val, y_val = build_xy(val_df)
+
+    model = build_ensemble()
+    model.fit(X_train, y_train)
+
+    val_pred = model.predict(X_val)
+    acc = accuracy_score(y_val,val_pred)
+    print(f"Holdout season {Config.HOLDOUT_SEASON} accuracy: {acc:.3f}")
+
+    save_model(model)
+    print(f"Saved model to {Config.MODEL_PATH}")
+
+if __name__ == "__main__":
+    main()
