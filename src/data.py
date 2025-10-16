@@ -1,65 +1,58 @@
 import pandas as pd
 import numpy as np
-from dateutil import parser
 from .config import Config
 import nfl_data_py as nfl
 
+
+# SCHEDULE 
 def load_games(seasons):
-    # Schedule with results
+    """
+    Load schedule/results and standardize key fields.
+    """
     sched = nfl.import_schedules(seasons)
-    # Standardize key fields
-    sched =sched.rename(columns={
-        "home_team": "home_team",
-        "away_team": "away_team",
-        "home_score": "home_score",
-        "away_score": "away_score",
+    # Normalize expected columns
+    sched = sched.rename(columns={
         "gameday": "gameday",
         "game_id": "game_id",
         "season": "season",
         "week": "week",
         "game_type": "game_type",
-        "venue": "venue"
+        "home_team": "home_team",
+        "away_team": "away_team",
+        "home_score": "home_score",
+        "away_score": "away_score",
+        "venue": "venue",
     })
-    # Parse dates of games
-    sched["gameday"] = pd.to_datetime(sched["gameday"])
-    # Filter regular season only
+    sched["gameday"] = pd.to_datetime(sched["gameday"], errors="coerce")
+    # Regular season only
     sched = sched[sched["game_type"] == "REG"].copy()
-    # Winner flag
+    # Winner flags
     sched["home_win"] = (sched["home_score"] > sched["away_score"]).astype(int)
     sched["away_win"] = 1 - sched["home_win"]
     return sched
 
+
+# WEEKLY -> TEAM PER GAME 
 def team_game_stats(seasons):
     """
-    Build per-team, per-game stats from player weekly data (nfl_data_py 0.3.3).
-    We aggregate passing yards, rushing yards, and turnovers (INT + fumbles lost).
-    Points for/against are merged later from schedules for reliability.
+    Build per-team, per-game totals from weekly player data (nfl-data-py 0.3.3).
+    Aggregates passing_yards, rushing_yards, turnovers (INT + fumbles lost).
+    'game_id' and 'home_away' may be missing here; we will infer from schedule later.
     """
-
     wk = nfl.import_weekly_data(seasons)
-    def pick(colnames, candidates, default=None):
-        for c in candidates:
-            if c in colnames:
-                return c
-        if default is not None:
-            return default
-        raise ValueError(f"None of the expected columns {candidates} found in weekly data")
-    
     cols = set(wk.columns)
 
-     # Helper that returns the first present name or None (never raises)
     def first_or_none(candidates):
         for c in candidates:
             if c in cols:
                 return c
         return None
 
-
     team_col      = first_or_none(["recent_team", "team"])
     opp_col       = first_or_none(["opponent_team", "opponent"])
     week_col      = first_or_none(["week"])
     season_col    = first_or_none(["season"])
-    game_id_col   = "game_id" if "game_id" in cols else None  
+    game_id_col   = "game_id" if "game_id" in cols else None
     home_away_col = first_or_none(["home_away"])
 
     pass_yds_col  = first_or_none(["pass_yds", "passing_yards"])
@@ -67,12 +60,9 @@ def team_game_stats(seasons):
     ints_col      = first_or_none(["interceptions", "int"])
     fumlost_col   = first_or_none(["fumbles_lost", "fum_lost"])
 
-
-    required = [team_col, opp_col, week_col, season_col]
-    if any(c is None for c in required):
-        missing = ["team","opponent","week","season"]
-        raise ValueError(f"Weekly data is missing required identifiers: {missing}. Found: {wk.columns.tolist()}")
-
+    # Ensure we have the identifiers
+    if any(c is None for c in [team_col, opp_col, week_col, season_col]):
+        raise ValueError(f"Weekly data missing required identifiers. Found columns: {sorted(wk.columns)}")
 
     use_cols = [season_col, week_col, team_col, opp_col]
     if game_id_col:   use_cols.append(game_id_col)
@@ -82,8 +72,8 @@ def team_game_stats(seasons):
 
     df = wk[use_cols].copy()
 
-    # Build turnovers (INT + fumbles lost); coerce missing to 0
-    for c in [ints_col, fumlost_col, pass_yds_col, rush_yds_col]:
+    # Coerce numeric and fill missing with 0
+    for c in [pass_yds_col, rush_yds_col, ints_col, fumlost_col]:
         if c and c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
@@ -91,18 +81,11 @@ def team_game_stats(seasons):
     df["passing_yards"] = df[pass_yds_col] if pass_yds_col in df else 0
     df["rushing_yards"] = df[rush_yds_col] if rush_yds_col in df else 0
 
-    # If game_id/home_away missing, we’ll infer later from schedules during matchup join
-    if game_id_col is None:
-        df["game_id"] = np.nan
-    else:
-        df["game_id"] = df[game_id_col]
+    # Optional identifiers
+    df["game_id"]   = df[game_id_col] if game_id_col else np.nan
+    df["home_away"] = df[home_away_col].str.upper() if home_away_col else np.nan
 
-    if home_away_col is None:
-        # infer later during make_matchups; placeholder
-        df["home_away"] = np.nan
-    else:
-        df["home_away"] = df[home_away_col].str.upper()
-
+    # Canonical names
     df.rename(columns={
         season_col: "season",
         week_col: "week",
@@ -110,23 +93,57 @@ def team_game_stats(seasons):
         opp_col: "opponent",
     }, inplace=True)
 
-    # Aggregate player rows -> team-per-game totals
+    # Aggregate player rows -> team-per-game
     group_keys = ["season", "week", "team", "opponent", "game_id", "home_away"]
     agg = (df.groupby(group_keys, dropna=False)[["passing_yards", "rushing_yards", "turnovers"]]
              .sum()
              .reset_index())
 
-    # Attach a game_date to enable rest-day calcs later; we’ll merge from schedules in build_dataset
     return agg
 
 
+# ROLLING FEATURES
+def add_rolling_features(df, n):
+    """
+    Compute rolling means over last N games (per team), a simple momentum proxy,
+    and rest days (time since previous game).
+    Expects df to have: team, season, week, game_date, points_for, points_against, passing_yards, rushing_yards, turnovers
+    """
+    sort_cols = ["team", "season", "week"]
+    df = df.sort_values(sort_cols).copy()
+    grp = df.groupby("team", group_keys=False)
+
+    # rolling means of team stats
+    def roll(col, out):
+        df[out] = grp[col].apply(lambda s: s.shift(1).rolling(n, min_periods=1).mean())
+
+    roll("points_for",     "team_pf_roll")
+    roll("points_against", "team_pa_roll")
+    roll("passing_yards",  "team_pass_y_roll")
+    roll("rushing_yards",  "team_rush_y_roll")
+    roll("turnovers",      "team_to_roll")
+
+    # simple momentum = scaled PF-PA
+    df["team_elo_momentum"] = (df["team_pf_roll"] - df["team_pa_roll"]) / (df["team_pf_roll"].abs() + 1)
+
+    # rest days
+    df["prev_game_date"] = grp["game_date"].shift(1)
+    df["team_rest_days"] = (df["game_date"] - df["prev_game_date"]).dt.days.fillna(10)
+    df.drop(columns=["prev_game_date"], inplace=True)
+    return df
+
+
+# MATCHUPS
 def make_matchups(df, sched):
-    # Flag home team
+    """
+    Build stacked (team-vs-opp) rows so each game contributes two rows,
+    one for the home perspective and one for the away perspective.
+    """
     df["home"] = (df["home_away"] == "HOME").astype(int)
 
-    # Merge to ensure both teams on one row
-    home = df[df["home"] == 1].copy()
-    away = df[df["home"] == 0].copy()
+    # Defensive dedup: keep one row per side per game
+    home = home.drop_duplicates(subset=["game_id"])  # one home row per game
+    away = away.drop_duplicates(subset=["game_id"])  # one away row per game
 
     merged = home.merge(
         away,
@@ -135,21 +152,13 @@ def make_matchups(df, sched):
         validate="one_to_one"
     )
 
-    # Rename for clarity
-    merged = merged.rename(columns={
-        "team": "home_team_code",
-        "opponent": "home_opp_code",
-        "team_opp": "away_team_code",
-        "opponent_opp": "away_opp_code"
-    })
     # Winner target from schedule (home win)
     sched_small = sched[["game_id", "home_win", "home_team", "away_team"]]
     out = merged.merge(sched_small, on="game_id", how="left")
 
-    # Build a team-centric dataset by stacking home and away perspectives
+    # Home perspective (team = home)
     def select_cols(prefix):
         return {
-            # team side
             f"{prefix}points_for": "points_for",
             f"{prefix}points_against": "points_against",
             f"{prefix}passing_yards": "passing_yards",
@@ -164,80 +173,97 @@ def make_matchups(df, sched):
             f"{prefix}team_rest_days": "team_rest_days",
         }
 
-    # Home perspective (team = home)
     home_cols = {
         "home": "home",
         **select_cols(""),
-        **{k+"_opp": v.replace("team_", "opp_") for k, v in select_cols("").items()},
+        **{k + "_opp": v.replace("team_", "opp_") for k, v in select_cols("").items()},
     }
-
     home_view = out.rename(columns=home_cols).copy()
     home_view["team_win"] = out["home_win"]
 
     # Away perspective (team = away)
     away_cols = {
-        "home": "home",  # but will be 0 in away rows
-        **{k+"_opp": v for k, v in select_cols("").items()},                # team side comes from away columns
-        **{k: v.replace("team_", "opp_") for k, v in select_cols("").items()},  # opp side comes from home columns
+        "home": "home",  # will be 0 in these rows
+        **{k + "_opp": v for k, v in select_cols("").items()},
+        **{k: v.replace("team_", "opp_") for k, v in select_cols("").items()},
     }
     away_view = out.rename(columns=away_cols).copy()
     away_view["team_win"] = 1 - out["home_win"]
 
-    # Concatenate
     stacked = pd.concat([home_view, away_view], ignore_index=True)
 
-    # Keep basic identifiers
+    # Keep identifiers
     keep_id = ["game_id", "season", "week", "home_team", "away_team"]
-    stacked = stacked.merge(
-        sched[keep_id].drop_duplicates(),
-        on="game_id", how="left"
-    )
-
+    stacked = stacked.merge(sched[keep_id].drop_duplicates(), on="game_id", how="left")
     return stacked
 
+
+# FULL DATASET 
 def build_dataset(seasons=None, rolling_n=None):
     seasons = seasons or Config.SEASONS
     rolling_n = rolling_n or Config.ROLLING_N
 
+    # load schedule and weekly -> team-per-game aggregates
     sched = load_games(seasons)
     teamlogs = team_game_stats(seasons)
 
-     # If game_id/home_away missing from weekly data, infer via schedule
-    if teamlogs["game_id"].isna().any() or teamlogs["home_away"].isna().any():
-        # Home join
-        home_side = sched[["game_id","season","week","home_team","away_team","gameday"]].copy()
-        home_side["team"] = home_side["home_team"]
-        home_side["opponent"] = home_side["away_team"]
-        home_side["home_away"] = "HOME"
+        # ---- Ensure one row per (game_id, team) ----
+    num_cols = ["passing_yards", "rushing_yards", "turnovers"]
+    take_first_cols = [
+        "points_for", "points_against", "game_date", "home_away",
+        "season", "week", "opponent"
+    ]
 
-        # Away join
-        away_side = sched[["game_id","season","week","home_team","away_team","gameday"]].copy()
-        away_side["team"] = away_side["away_team"]
-        away_side["opponent"] = away_side["home_team"]
-        away_side["home_away"] = "AWAY"
+    agg_spec = {c: "sum" for c in num_cols}
+    agg_spec.update({c: "first" for c in take_first_cols})
 
-        sched_team_rows = pd.concat([home_side, away_side], ignore_index=True)
-        teamlogs = teamlogs.drop(columns=["game_id","home_away"], errors="ignore").merge(
-            sched_team_rows[["game_id","season","week","team","opponent","home_away","gameday"]],
-            on=["season","week","team","opponent"],
-            how="left",
-            validate="many_to_one"
-        )
-    else:
-        # Ensure we have game_date as 'gameday' for rest calcs
-        teamlogs = teamlogs.merge(
-            sched[["game_id","gameday"]],
-            on="game_id", how="left"
-        )
-    teamlogs.rename(columns={"gameday": "game_date"}, inplace=True)
+    teamlogs = (teamlogs
+                .sort_values(["season", "week", "team"])
+                .groupby(["game_id", "team"], as_index=False)
+                .agg(agg_spec))
 
+
+    # Infer game_id, home_away, game_date, points_for/against from schedule
+    home_side = sched[["game_id", "season", "week", "home_team", "away_team", "gameday", "home_score", "away_score"]].copy()
+    home_side["team"] = home_side["home_team"]
+    home_side["opponent"] = home_side["away_team"]
+    home_side["home_away"] = "HOME"
+    home_side["points_for"] = home_side["home_score"]
+    home_side["points_against"] = home_side["away_score"]
+
+    away_side = sched[["game_id", "season", "week", "home_team", "away_team", "gameday", "home_score", "away_score"]].copy()
+    away_side["team"] = away_side["away_team"]
+    away_side["opponent"] = away_side["home_team"]
+    away_side["home_away"] = "AWAY"
+    away_side["points_for"] = away_side["away_score"]
+    away_side["points_against"] = away_side["home_score"]
+
+    sched_team_rows = pd.concat([home_side, away_side], ignore_index=True)
+    sched_team_rows.rename(columns={"gameday": "game_date"}, inplace=True)
+    sched_team_rows["game_date"] = pd.to_datetime(sched_team_rows["game_date"], errors="coerce")
+
+    # Merge schedule-derived identifiers/scores into teamlogs
+    teamlogs = teamlogs.drop(columns=["game_id", "home_away"], errors="ignore").merge(
+        sched_team_rows[
+            ["game_id", "season", "week", "team", "opponent", "home_away", "game_date", "points_for", "points_against"]
+        ],
+        on=["season", "week", "team", "opponent"],
+        how="left",
+        validate="many_to_one"
+    )
+
+    # Rolling features & momentum/rest
     teamlogs = add_rolling_features(teamlogs, rolling_n)
+
+    # Build team-vs-opp stacked dataset
     dataset = make_matchups(teamlogs, sched)
 
-    # Drop rows with missing target or critical rolls (first games can miss rolling)
+    # Drop rows with missing target (shouldn’t happen for completed games)
     dataset = dataset.dropna(subset=["team_win"])
-    # Some initial weeks have NaNs in rolling stats; drop or fill
+
+    # Early-season rolling NaNs → fill with column means
     roll_cols = [c for c in dataset.columns if c.endswith("_roll")]
-    dataset[roll_cols] = dataset[roll_cols].fillna(dataset[roll_cols].mean())
+    if roll_cols:
+        dataset[roll_cols] = dataset[roll_cols].fillna(dataset[roll_cols].mean())
 
     return dataset
