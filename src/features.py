@@ -1,3 +1,4 @@
+from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -15,8 +16,11 @@ def build_xy(df):
     return X, y
 
 def numeric_pipeline():
-    # Scale all numeric features
-    return Pipeline([("scaler", StandardScaler())])
+    # Fill NaNs (median), then scale
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ])
 
 def build_preprocessor():
     numeric_features = Config.FEATURES
