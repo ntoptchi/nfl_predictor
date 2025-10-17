@@ -1,4 +1,3 @@
-# src/predict.py
 from argparse import ArgumentParser
 import pandas as pd
 from .data import build_dataset, load_games
