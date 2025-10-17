@@ -37,7 +37,9 @@ def build_ensemble(preprocessor=None):
     return pipe
 
 def save_model(pipe):
+    import os
+    os.makedirs(os.path.dirname(Config.MODEL_PATH), exist_ok=True)
     dump(pipe, Config.MODEL_PATH)
-
+    
 def load_model():
     return load(Config.MODEL_PATH)
