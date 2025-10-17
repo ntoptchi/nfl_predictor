@@ -22,47 +22,68 @@ def load_games(seasons):
 def team_game_stats(seasons):
     """
     Aggregate player weekly rows into per-team, per-game totals.
+    Skips seasons whose weekly parquet is not yet published (e.g., future/current).
     Returns one row per (season, week, team) with passing_yards, rushing_yards, turnovers.
     """
-    wk = nfl.import_weekly_data(seasons).copy()
-    cols = set(wk.columns)
+    import pandas as pd
+    import nfl_data_py as nfl
 
-    def pick(*cands):
-        for c in cands:
-            if c in cols: return c
-        return None
+    frames = []
+    for yr in sorted(set(seasons)):
+        try:
+            wk = nfl.import_weekly_data([yr]).copy()  # fetch one season at a time to catch 404s
+        except Exception as e:
+            print(f"[team_game_stats] Skipping season {yr}: {e}")
+            continue
 
-    team_col   = pick("recent_team","team")
-    week_col   = pick("week")
-    season_col = pick("season")
-    pass_col   = pick("pass_yds","passing_yards")
-    rush_col   = pick("rush_yds","rushing_yards")
-    int_col    = pick("interceptions","int")
-    fum_col    = pick("fumbles_lost","fum_lost")
+        cols = set(wk.columns)
 
-    need = [team_col, week_col, season_col]
-    if any(x is None for x in need):
-        raise ValueError(f"Weekly data missing identifiers. Columns: {sorted(wk.columns)}")
+        def pick(*cands):
+            for c in cands:
+                if c in cols:
+                    return c
+            return None
 
-    use = [season_col, week_col, team_col]
-    for c in [pass_col, rush_col, int_col, fum_col]:
-        if c: use.append(c)
-    df = wk[use].copy()
+        team_col   = pick("recent_team", "team")
+        week_col   = pick("week")
+        season_col = pick("season")
+        pass_col   = pick("pass_yds", "passing_yards")
+        rush_col   = pick("rush_yds", "rushing_yards")
+        int_col    = pick("interceptions", "int")
+        fum_col    = pick("fumbles_lost", "fum_lost")
 
-    # numeric
-    for c in [pass_col, rush_col, int_col, fum_col]:
-        if c and c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+        # Required identifiers must exist
+        if any(x is None for x in [team_col, week_col, season_col]):
+            print(f"[team_game_stats] Missing identifiers for {yr}; columns={sorted(wk.columns)} — skipping")
+            continue
 
-    df = df.rename(columns={season_col:"season", week_col:"week", team_col:"team"})
-    df["passing_yards"] = df[pass_col] if pass_col in df.columns else 0
-    df["rushing_yards"] = df[rush_col] if rush_col in df.columns else 0
-    df["turnovers"]     = (df[int_col] if int_col in df.columns else 0) + (df[fum_col] if fum_col in df.columns else 0)
+        use = [season_col, week_col, team_col]
+        for c in [pass_col, rush_col, int_col, fum_col]:
+            if c:
+                use.append(c)
+        df = wk[use].copy()
 
-    # collapse to one row per (season, week, team)
-    agg = (df.groupby(["season","week","team"], as_index=False)[["passing_yards","rushing_yards","turnovers"]]
-             .sum())
-    return agg
+        # numeric
+        for c in [pass_col, rush_col, int_col, fum_col]:
+            if c and c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+
+        df = df.rename(columns={season_col: "season", week_col: "week", team_col: "team"})
+        df["passing_yards"] = df[pass_col] if pass_col in df.columns else 0
+        df["rushing_yards"] = df[rush_col] if rush_col in df.columns else 0
+        df["turnovers"]     = (df[int_col] if int_col in df.columns else 0) + (df[fum_col] if fum_col in df.columns else 0)
+
+        agg = (
+            df.groupby(["season", "week", "team"], as_index=False)[["passing_yards", "rushing_yards", "turnovers"]]
+              .sum()
+        )
+        frames.append(agg)
+
+    if not frames:
+        raise RuntimeError("No weekly data could be loaded for the requested seasons — check internet or seasons list.")
+
+    return pd.concat(frames, ignore_index=True)
+
 
 # ---------------------- ROLLING FEATURES ----------------------
 def add_rolling_features(df, n):
