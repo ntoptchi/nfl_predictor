@@ -14,7 +14,7 @@ def _pick_col(df: pd.DataFrame, base: str) -> str:
     for c in (base, f"{base}_x", f"{base}_y"):
         if c in df.columns:
             return c
-    raise KeyError(f"Column '{base}' not found (nor with _x/_y suffix) in columns: {list(df.columns)}")
+    raise KeyError(f"Column '{base}' not found (nor with _x/_y) in columns: {list(df.columns)}")
 
 def main():
     parser = ArgumentParser()
@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Print shapes/columns for troubleshooting")
     args = parser.parse_args()
 
-    # Build dataset through the requested season so rolling features exist (future season weekly may not exist; that's OK)
+    # Build dataset through requested season so rolling features exist
     all_seasons = list(range(min(Config.SEASONS), args.season + 1))
     df = build_dataset(seasons=all_seasons, rolling_n=Config.ROLLING_N)
 
@@ -44,7 +44,7 @@ def main():
 
     if args.debug:
         print("df_wk shape:", df_wk.shape)
-        print("df_wk columns (head):", list(df_wk.columns)[:20])
+        print("df_wk columns (sample):", list(df_wk.columns)[:25])
 
     # Predict
     model = load_model()
@@ -59,13 +59,15 @@ def main():
             .head(1)
     )
 
-    # Merge back the official game labels (may introduce _x/_y suffixes)
+    # Merge back official labels (may create _x/_y)
     best = best.merge(games, on="game_id", how="left")
 
-    # Resolve column names safely
-    home_col = _pick_col(best, "home_team")
-    away_col = _pick_col(best, "away_team")
-    date_col = _pick_col(best, "gameday")  # should not suffix, but just in case
+    # Resolve columns safely
+    home_col   = _pick_col(best, "home_team")
+    away_col   = _pick_col(best, "away_team")
+    date_col   = _pick_col(best, "gameday")
+    season_col = _pick_col(best, "season")
+    week_col   = _pick_col(best, "week")
 
     # Winner based on which side the kept row represents
     best["predicted_winner"] = best.apply(
@@ -73,12 +75,18 @@ def main():
     )
     best["confidence"] = best["team_prob_win"]
 
-    out_cols = ["season", "week", date_col, home_col, away_col, "predicted_winner", "confidence"]
-    out = best[out_cols].rename(columns={
-        date_col: "gameday",
-        home_col: "home_team",
-        away_col: "away_team",
-    }).sort_values(["gameday", "home_team"]).reset_index(drop=True)
+    out = (
+        best[[season_col, week_col, date_col, home_col, away_col, "predicted_winner", "confidence"]]
+        .rename(columns={
+            season_col: "season",
+            week_col:   "week",
+            date_col:   "gameday",
+            home_col:   "home_team",
+            away_col:   "away_team",
+        })
+        .sort_values(["gameday", "home_team"])
+        .reset_index(drop=True)
+    )
 
     # Print nicely
     pd.set_option("display.width", 120)
