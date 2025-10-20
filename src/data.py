@@ -1,10 +1,9 @@
-# src/data.py
 import pandas as pd
 import numpy as np
 import nfl_data_py as nfl
 from .config import Config
 
-# ---------------------- SCHEDULE ----------------------
+#  SCHEDULE
 def load_games(seasons):
     sched = nfl.import_schedules(seasons).copy()
     # keep regular season only
@@ -18,7 +17,7 @@ def load_games(seasons):
     sched["home_win"] = (sched["home_score"] > sched["away_score"]).astype(int)
     return sched[["game_id","season","week","home_team","away_team","home_score","away_score","gameday","home_win"]]
 
-# ---------------------- WEEKLY -> TEAM TOTALS ----------------------
+#  WEEKLY -> TEAM TOTALS 
 def team_game_stats(seasons):
     """
     Aggregate player weekly rows into per-team, per-game totals.
@@ -85,7 +84,7 @@ def team_game_stats(seasons):
     return pd.concat(frames, ignore_index=True)
 
 
-# ---------------------- ROLLING FEATURES ----------------------
+#  ROLLING FEATURES
 def add_rolling_features(df, n):
     df = df.sort_values(["team","season","week"]).copy()
     grp = df.groupby("team", group_keys=False)
@@ -106,7 +105,7 @@ def add_rolling_features(df, n):
     df.drop(columns=["prev_game_date"], inplace=True)
     return df
 
-# ---------------------- MATCHUPS (STACKED) ----------------------
+# MATCHUPS (STACKED) 
 def make_matchups(team_side, sched):
     """
     Build stacked (team-vs-opp) rows with UNIQUE column names.
@@ -199,7 +198,7 @@ def make_matchups(team_side, sched):
 
     return stacked
 
-# ---------------------- BUILD DATASET ----------------------
+#  BUILD DATASET 
 def build_dataset(seasons=None, rolling_n=None):
     seasons = seasons or Config.SEASONS
     rolling_n = rolling_n or Config.ROLLING_N
