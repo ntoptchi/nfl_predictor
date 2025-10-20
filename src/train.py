@@ -6,6 +6,7 @@ from .data import build_dataset
 from .features import split_train_val, build_xy
 from .model import build_ensemble, save_model
 from .config import Config
+from .model import calibrate_model
 
 def main():
     parser = argparse.ArgumentParser()
@@ -22,6 +23,11 @@ def main():
     model.fit(X_train, y_train)
 
     val_pred = model.predict(X_val)
+
+
+    cal_model = calibrate_model(model, X_val, y_val, method="isotonic")
+    save_model(cal_model)
+
     acc = accuracy_score(y_val,val_pred)
     print(f"Holdout season {Config.HOLDOUT_SEASON} accuracy: {acc:.3f}")
 
