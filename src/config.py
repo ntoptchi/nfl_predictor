@@ -18,6 +18,7 @@ class Config:
             "team_rest_days", "opp_rest_days",
             "home",
             "team_elo_momentum", "opp_elo_momentum",
+            "team_elo", "opp_elo","elo_diff",
     ]
     TARGET = "team_win"
     
