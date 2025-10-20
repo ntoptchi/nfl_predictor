@@ -28,13 +28,20 @@ def build_base_estimators():
         )))
         return models
 
+from sklearn.calibration import CalibratedClassifierCV
+
 def build_ensemble(preprocessor=None):
     pre = preprocessor or build_preprocessor()
     estimators = build_base_estimators()
-    # soft voting for calibrated probs
     voter = VotingClassifier(estimators=estimators, voting="soft")
     pipe = Pipeline([("pre", pre), ("clf", voter)])
     return pipe
+
+def calibrate_model(trained_pipe, X_val, y_val, method="isotonic"):
+    # Wrap the whole pipeline with a calibrator (calibrates final clf outputs)
+    # Fit only on holdout season to avoid leakage.
+    return CalibratedClassifierCV(trained_pipe, method=method, cv="prefit").fit(X_val, y_val)
+
 
 def save_model(pipe):
     import os
