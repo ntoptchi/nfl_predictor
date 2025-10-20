@@ -3,7 +3,7 @@ import numpy as np
 import nfl_data_py as nfl
 from .config import Config
 
-#  SCHEDULE
+#  SCHEDULE 
 def load_games(seasons):
     sched = nfl.import_schedules(seasons).copy()
     # keep regular season only
@@ -17,6 +17,7 @@ def load_games(seasons):
     sched["home_win"] = (sched["home_score"] > sched["away_score"]).astype(int)
     return sched[["game_id","season","week","home_team","away_team","home_score","away_score","gameday","home_win"]]
 
+
 #  WEEKLY -> TEAM TOTALS 
 def team_game_stats(seasons):
     """
@@ -24,13 +25,10 @@ def team_game_stats(seasons):
     Skips seasons whose weekly parquet is not yet published (e.g., future/current).
     Returns one row per (season, week, team) with passing_yards, rushing_yards, turnovers.
     """
-    import pandas as pd
-    import nfl_data_py as nfl
-
     frames = []
     for yr in sorted(set(seasons)):
         try:
-            wk = nfl.import_weekly_data([yr]).copy()  # fetch one season at a time to catch 404s
+            wk = nfl.import_weekly_data([yr]).copy()  # per-year to catch 404s
         except Exception as e:
             print(f"[team_game_stats] Skipping season {yr}: {e}")
             continue
@@ -84,7 +82,7 @@ def team_game_stats(seasons):
     return pd.concat(frames, ignore_index=True)
 
 
-#  ROLLING FEATURES
+#  ROLLING FEATURES 
 def add_rolling_features(df, n):
     df = df.sort_values(["team","season","week"]).copy()
     grp = df.groupby("team", group_keys=False)
@@ -105,14 +103,12 @@ def add_rolling_features(df, n):
     df.drop(columns=["prev_game_date"], inplace=True)
     return df
 
+
 # MATCHUPS (STACKED) 
 def make_matchups(team_side, sched):
     """
     Build stacked (team-vs-opp) rows with UNIQUE column names.
-    Each game contributes two rows:
-      - home_view: team = home side
-      - away_view: team = away side
-    Columns are prefixed for opponent as 'opp_*' to avoid duplicates.
+    Adds team_elo, opp_elo, and elo_diff for the modeling pipeline.
     """
     df = team_side.copy()
     df["home"] = (df["home_away"] == "HOME").astype(int)
@@ -155,6 +151,9 @@ def make_matchups(team_side, sched):
             "team_to_roll":       src[f"team_to_roll{team_from}"],
             "team_elo_momentum":  src[f"team_elo_momentum{team_from}"],
             "team_rest_days":     src[f"team_rest_days{team_from}"],
+            # Elo features on team side
+            "team_elo":           src[f"team_elo{team_from}"],
+            "elo_diff":           src[f"elo_diff{team_from}"],
             # opponent stats (unique names)
             "opp_points_for":         src[f"points_for{opp_from}"],
             "opp_points_against":     src[f"points_against{opp_from}"],
@@ -168,11 +167,13 @@ def make_matchups(team_side, sched):
             "opp_to_roll":            src[f"team_to_roll{opp_from}"],
             "opp_elo_momentum":       src[f"team_elo_momentum{opp_from}"],
             "opp_rest_days":          src[f"team_rest_days{opp_from}"],
+            #opponent Elo on opp side
+            "opp_elo":                src[f"team_elo{opp_from}"],
         })
         out["team_win"] = team_win_expr(src).astype(int)
         return out
 
-    # home perspective: take team stats from '', opp from '_opp'
+    # home perspective: team stats from '', opp from '_opp'
     home_view = build_row(
         merged,
         team_from="",
@@ -181,7 +182,7 @@ def make_matchups(team_side, sched):
         team_win_expr=lambda s: s["home_win"],
     )
 
-    # away perspective: take team stats from '_opp', opp from ''
+    # away perspective: team stats from '_opp', opp from ''
     away_view = build_row(
         merged,
         team_from="_opp",
@@ -198,7 +199,8 @@ def make_matchups(team_side, sched):
 
     return stacked
 
-#  BUILD DATASET 
+
+#  BUILD DATASET
 def build_dataset(seasons=None, rolling_n=None):
     seasons = seasons or Config.SEASONS
     rolling_n = rolling_n or Config.ROLLING_N
@@ -247,7 +249,35 @@ def build_dataset(seasons=None, rolling_n=None):
             .sum()
         )
 
-    # Add rolling features
+    #  Simple Elo (team_elo) + opponent Elo + diff 
+    def _simple_elo(df):
+        # df has one row per (game_id, team) with points_for/against and game_date
+        df = df.sort_values(["team","season","week"]).copy()
+        K = 20
+        base = 1500.0
+        elo = {}
+        ratings = []
+        for _, r in df.iterrows():
+            t, opp = r["team"], r["opponent"]
+            Ra = elo.get(t, base); Rb = elo.get(opp, base)
+            Ea = 1.0 / (1 + 10 ** ((Rb - Ra)/400))
+            win = 1.0 if r["points_for"] > r["points_against"] else 0.0
+            Ra_new = Ra + K * (win - Ea)
+            elo[t] = Ra_new
+            ratings.append(Ra_new)
+        df["team_elo"] = ratings
+        return df
+
+    team_side = _simple_elo(team_side)
+
+    # Opponent Elo (merge by game), and elo_diff feature
+    team_side = team_side.merge(
+        team_side[["game_id","team","team_elo"]].rename(columns={"team":"opponent","team_elo":"opp_elo"}),
+        on=["game_id","opponent"], how="left"
+    )
+    team_side["elo_diff"] = team_side["team_elo"] - team_side["opp_elo"]
+
+    # Rolling features (this uses points_for/against etc. already attached)
     team_side = add_rolling_features(team_side, rolling_n)
 
     # Build stacked dataset (two rows per game)
