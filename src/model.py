@@ -8,6 +8,7 @@ from joblib import dump, load
 from .config import Config
 from .features import build_preprocessor
 import numpy as np
+from sklearn.calibration import CalibratedClassifierCV
 
 try:
     from xgboost import XGBClassifier
