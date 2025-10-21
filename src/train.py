@@ -31,6 +31,11 @@ def main():
     acc = accuracy_score(y_val,val_pred)
     print(f"Holdout season {Config.HOLDOUT_SEASON} accuracy: {acc:.3f}")
 
+    if getattr(Config, "CALIBRATE", False):
+        method = getattr(Config, "CALIBRATION_METHOD", "isotonic")
+        model = calibrate_model(model, X_val, y_val, method=method)
+        print(f"Calibrated probabilities using {method}.")
+
     save_model(model)
     print(f"Saved model to {Config.MODEL_PATH}")
 
