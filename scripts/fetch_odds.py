@@ -9,7 +9,7 @@ if ROOT not in sys.path:
 from src.data import load_games
 from src.config import Config
 
-ODDS_API_KEY = os.getenv("ODDS_API_KEY") # not disclosing mine 
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 SPORT = "americanfootball_nfl"
 BASE = "https://api.the-odds-api.com/v4/sports"
 
