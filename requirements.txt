@@ -11,3 +11,4 @@ pyarrow>=14.0.2
 requests
 python-dateutil
 optuna>=3.6.0
+matplotlib>=3.8
