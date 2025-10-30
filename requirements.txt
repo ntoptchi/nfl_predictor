@@ -12,3 +12,7 @@ requests
 python-dateutil
 optuna>=3.6.0
 matplotlib>=3.8
+fastapi
+uvicorn[standard]
+pydantic>=2
+python-multipart
