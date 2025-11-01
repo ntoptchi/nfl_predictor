@@ -8,7 +8,7 @@ from .data import build_dataset
 from .model import load_model
 
 def _select_best_side(df_with_probs: pd.DataFrame) -> pd.DataFrame:
-    # keep the higher-probability side per game
+    # keeps the higher-probability side per game
     return (
         df_with_probs.sort_values(["game_id", "team_prob_win"], ascending=[True, False])
                      .groupby("game_id", as_index=False)
