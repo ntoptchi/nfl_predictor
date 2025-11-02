@@ -9,7 +9,7 @@ import nfl_data_py as nfl
 
 def _team_week_epa_sr(pbp: pd.DataFrame) -> pd.DataFrame:
     df = pbp.copy()
-    # keep snaps with EPA defined
+    # keep snap with EPA defined
     df = df[df["epa"].notna()].copy()
 
     # success flag: nflfastR defines 'success' column; fall back to epa>0 if missing
