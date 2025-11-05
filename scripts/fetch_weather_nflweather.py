@@ -87,7 +87,7 @@ def attach_game_ids(df: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
         validate="many_to_one"
     )
 
-    # If some game_id are missing, try swapped (bad home/away in feed)
+    # If some game_ids are missing, try swapped (bad home/away in feed)
     missing = merged["game_id"].isna()
     if missing.any():
         swapped = df.loc[missing, :].rename(columns={"home_team": "away_team", "away_team": "home_team"})
