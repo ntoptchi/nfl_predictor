@@ -42,7 +42,7 @@ def pick_table_for_season(season: int, rolling_n: int):
     model = load_model()
     df_season["team_prob_win"] = model.predict_proba(df_season[Config.FEATURES])[:, 1]
 
-    # choose higher-probability side per game
+    # chooses higher-probability side per game
     best = (df_season.sort_values(["game_id", "team_prob_win"], ascending=[True, False])
                       .groupby("game_id", as_index=False)
                       .head(1)

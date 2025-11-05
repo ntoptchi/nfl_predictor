@@ -49,7 +49,7 @@ def main():
     else:
         build_span = Config.SEASONS
 
-    # Build dataset across history, then filter for reporting season if provided
+    # Build dataset across history, then filters for reporting season if provided
     df = build_dataset(seasons=build_span, rolling_n=args.rolling_n)
     if args.season:
         df = df[df["season"] == args.season].copy()

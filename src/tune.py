@@ -22,7 +22,7 @@ def _season_folds(df: pd.DataFrame, min_seasons=5, max_folds=None):
         if len(tr_idx) and len(te_idx):
             yield tr_idx, te_idx, test_season
 
-
+# differnt models
 def _suggest_params(trial: optuna.Trial) -> dict:
     # VotingClassifier nested params + weights
     params = {
