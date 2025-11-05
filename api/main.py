@@ -9,7 +9,7 @@ from .utils import compute_week_picks, split_top_and_flips, run_backtest, run_be
 
 app = FastAPI(title="NFL Predictor API", version="1.0.0")
 
-# CORS (adjust for your domain)
+# CORS (adjust for domain)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True,
