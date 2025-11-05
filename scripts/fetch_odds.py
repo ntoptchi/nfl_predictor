@@ -103,7 +103,7 @@ def main():
     out_cols = ["game_id","close_spread_home","ml_home","ml_away","total_points"]
     merged = merged[out_cols].drop_duplicates(subset=["game_id"], keep="last")
 
-    # append/overwrite per game_id
+    # append/overwrites per game_id
     if os.path.exists(args.out):
         old = pd.read_csv(args.out)
         merged = pd.concat([old, merged]).drop_duplicates(subset=["game_id"], keep="last")
