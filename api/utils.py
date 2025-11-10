@@ -25,8 +25,8 @@ def compute_week_picks(season: int, week: int) -> pd.DataFrame:
     """
     Build features up to this season, filter to a specific week,
     run the model, and return one row per game with:
-    game_id, season, week, gameday, home_team, away_team,
-    predicted_winner, confidence
+      game_id, season, week, gameday, home_team, away_team,
+      predicted_winner, confidence
     """
     # Make sure we include all seasons used for training + the requested one
     base_seasons: List[int] = list(Config.SEASONS)
@@ -34,17 +34,13 @@ def compute_week_picks(season: int, week: int) -> pd.DataFrame:
         base_seasons.append(season)
     all_seasons = sorted(set(base_seasons))
 
-    # Build the full dataset (stacked team-side rows)
+    # Build the full stacked dataset (team-side rows)
     df = build_dataset(seasons=all_seasons, rolling_n=Config.ROLLING_N)
 
-    # Load schedule to know which games are in this week
-    sched = load_games(all_seasons)
-    games_week = sched[
-        (sched["season"] == season) & (sched["week"] == week)
-    ].copy()
-
-    if games_week.empty:
-        # No games found for this week
+    # Filter directly by season/week in the dataset
+    df_wk = df[(df["season"] == season) & (df["week"] == week)].copy()
+    if df_wk.empty:
+        # No rows for this week
         return pd.DataFrame(
             columns=[
                 "game_id",
@@ -58,26 +54,17 @@ def compute_week_picks(season: int, week: int) -> pd.DataFrame:
             ]
         )
 
-    # Keep only rows for games in this week
-    df_wk = df.merge(
-        games_week[["game_id"]],
-        on="game_id",
-        how="inner",
-    ).copy()
-
-    if df_wk.empty:
-        # No feature rows matched; return empty, not an error
-        return pd.DataFrame(
-            columns=[
-                "game_id",
-                "season",
-                "week",
-                "gameday",
-                "home_team",
-                "away_team",
-                "predicted_winner",
-                "confidence",
-            ]
+    # Just in case home_team / away_team didn't survive somewhere,
+    # fall back to schedule merge to restore them.
+    if ("home_team" not in df_wk.columns) or ("away_team" not in df_wk.columns):
+        sched = load_games(all_seasons)
+        games_week = sched[
+            (sched["season"] == season) & (sched["week"] == week)
+        ].copy()
+        df_wk = df_wk.merge(
+            games_week[["game_id", "home_team", "away_team", "gameday"]],
+            on="game_id",
+            how="left",
         )
 
     # Load the trained ensemble model
@@ -92,13 +79,27 @@ def compute_week_picks(season: int, week: int) -> pd.DataFrame:
         .head(1)
     )
 
-    # Attach home_team, away_team, gameday, week, season from the schedule
-    sched_small = games_week[
-        ["game_id", "home_team", "away_team", "gameday", "week", "season"]
-    ].copy()
-    best = best.merge(sched_small, on="game_id", how="left")
+    # Ensure we have a "gameday" column (string) for output
+    if "gameday" in best.columns:
+        best["gameday"] = best["gameday"].astype(str)
+    elif "game_date" in best.columns:
+        best["gameday"] = best["game_date"].astype(str)
+    else:
+        best["gameday"] = ""
 
-    # Now we are guaranteed to have home_team / away_team columns
+    # Predicted winner: use home flag + team names
+    if ("home_team" not in best.columns) or ("away_team" not in best.columns):
+        # As a last-resort fallback, attach schedule again
+        sched = load_games(all_seasons)
+        games_week = sched[
+            (sched["season"] == season) & (sched["week"] == week)
+        ].copy()
+        best = best.merge(
+            games_week[["game_id", "home_team", "away_team"]],
+            on="game_id",
+            how="left",
+        )
+
     best["predicted_winner"] = np.where(
         best["home"] == 1,
         best["home_team"],
@@ -118,7 +119,17 @@ def compute_week_picks(season: int, week: int) -> pd.DataFrame:
             "confidence",
         ]
     ].copy()
+
+    # Make sure types are JSON-serializable
+    out["game_id"] = out["game_id"].astype(str)
+    out["season"] = out["season"].astype(int)
+    out["week"] = out["week"].astype(int)
     out["gameday"] = out["gameday"].astype(str)
+    out["home_team"] = out["home_team"].astype(str)
+    out["away_team"] = out["away_team"].astype(str)
+    out["predicted_winner"] = out["predicted_winner"].astype(str)
+    out["confidence"] = out["confidence"].astype(float)
+
     return out
 
 
@@ -167,7 +178,6 @@ def run_betting_sim(
     Returns: bets_df, roi, total_staked, hit_rate, max_drawdown
     """
     picks = pick_table_for_season(season, Config.ROLLING_N)
-    # paths pulled from Config so they match your project layout
     market_path = os.path.join(Config.DATA_DIR, Config.FILE_MARKET)
     picks_mkt = attach_market_moneylines(picks, market_path)
     return simulate_bets(picks_mkt, min_edge, kelly, flat)
