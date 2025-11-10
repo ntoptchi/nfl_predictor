@@ -23,8 +23,11 @@ def _american_to_implied_prob(odds):
     p = pd.Series(0.0, index=s.index if hasattr(s, "index") else None)
     if hasattr(p, "where"):
         p = p.where(False, np.nan)  # init
-    p = np.where(pd.notnull(pos), 100.0 / (pos + 100.0),
-        np.where(pd.notnull(neg), (-neg) / ((-neg) + 100.0), np.nan))
+    p = np.where(
+        pd.notnull(pos),
+        100.0 / (pos + 100.0),
+        np.where(pd.notnull(neg), (-neg) / ((-neg) + 100.0), np.nan),
+    )
     return pd.Series(p)
 
 #  SCHEDULE 
@@ -37,7 +40,12 @@ def load_games(seasons):
             raise ValueError(f"Schedules missing column: {m}. Columns: {sorted(sched.columns)}")
     sched["gameday"] = pd.to_datetime(sched["gameday"], errors="coerce")
     sched["home_win"] = (sched["home_score"] > sched["away_score"]).astype(int)
-    return sched[["game_id","season","week","home_team","away_team","home_score","away_score","gameday","home_win"]]
+    return sched[[
+        "game_id","season","week",
+        "home_team","away_team",
+        "home_score","away_score",
+        "gameday","home_win"
+    ]]
 
 #  WEEKLY -> TEAM TOTALS 
 def team_game_stats(seasons):
@@ -53,7 +61,8 @@ def team_game_stats(seasons):
 
         def pick(*cands):
             for c in cands:
-                if c in cols: return c
+                if c in cols:
+                    return c
             return None
 
         team_col   = pick("recent_team", "team")
@@ -70,7 +79,8 @@ def team_game_stats(seasons):
 
         use = [season_col, week_col, team_col]
         for c in [pass_col, rush_col, int_col, fum_col]:
-            if c: use.append(c)
+            if c:
+                use.append(c)
         df = wk[use].copy()
 
         for c in [pass_col, rush_col, int_col, fum_col]:
@@ -80,9 +90,14 @@ def team_game_stats(seasons):
         df = df.rename(columns={season_col:"season", week_col:"week", team_col:"team"})
         df["passing_yards"] = df[pass_col] if pass_col in df.columns else 0
         df["rushing_yards"] = df[rush_col] if rush_col in df.columns else 0
-        df["turnovers"]     = (df[int_col] if int_col in df.columns else 0) + (df[fum_col] if fum_col in df.columns else 0)
+        df["turnovers"]     = (
+            (df[int_col] if int_col in df.columns else 0) +
+            (df[fum_col] if fum_col in df.columns else 0)
+        )
 
-        agg = df.groupby(["season","week","team"], as_index=False)[["passing_yards","rushing_yards","turnovers"]].sum()
+        agg = df.groupby(
+            ["season","week","team"], as_index=False
+        )[["passing_yards","rushing_yards","turnovers"]].sum()
         frames.append(agg)
 
     if not frames:
@@ -103,7 +118,9 @@ def add_rolling_features(df, n):
     roll("rushing_yards",  "team_rush_y_roll")
     roll("turnovers",      "team_to_roll")
 
-    df["team_elo_momentum"] = (df["team_pf_roll"] - df["team_pa_roll"]) / (df["team_pf_roll"].abs() + 1)
+    df["team_elo_momentum"] = (
+        df["team_pf_roll"] - df["team_pa_roll"]
+    ) / (df["team_pf_roll"].abs() + 1)
 
     df["prev_game_date"] = grp["game_date"].shift(1)
     df["team_rest_days"] = (df["game_date"] - df["prev_game_date"]).dt.days.fillna(10)
@@ -121,7 +138,12 @@ def make_matchups(team_side, sched):
     home = home.sort_values(["game_id","team"]).drop_duplicates(subset=["game_id"], keep="first")
     away = away.sort_values(["game_id","team"]).drop_duplicates(subset=["game_id"], keep="first")
 
-    merged = home.merge(away, on=["game_id","season","week"], suffixes=("", "_opp"), validate="one_to_one")
+    merged = home.merge(
+        away,
+        on=["game_id","season","week"],
+        suffixes=("", "_opp"),
+        validate="one_to_one",
+    )
 
     sched_small = sched[["game_id","home_win","home_team","away_team"]]
     merged = merged.merge(sched_small, on="game_id", how="left")
@@ -198,8 +220,14 @@ def make_matchups(team_side, sched):
         out["team_win"] = team_win_expr(src).astype(int)
         return out
 
-    home_view = build_row(merged, team_from="",     opp_from="_opp", home_flag=1, team_win_expr=lambda s: s["home_win"])
-    away_view = build_row(merged, team_from="_opp", opp_from="",     home_flag=0, team_win_expr=lambda s: 1 - s["home_win"])
+    home_view = build_row(
+        merged, team_from="",     opp_from="_opp", home_flag=1,
+        team_win_expr=lambda s: s["home_win"]
+    )
+    away_view = build_row(
+        merged, team_from="_opp", opp_from="",     home_flag=0,
+        team_win_expr=lambda s: 1 - s["home_win"]
+    )
 
     stacked = pd.concat([home_view, away_view], ignore_index=True)
     keep_id = ["game_id","home_team","away_team"]
@@ -216,7 +244,11 @@ def build_dataset(seasons=None, rolling_n=None):
     tstats = team_game_stats(seasons)
 
     # schedule-derived per-team rows
-    st = sched[["game_id","season","week","gameday","home_team","away_team","home_score","away_score"]].copy()
+    st = sched[[
+        "game_id","season","week","gameday",
+        "home_team","away_team","home_score","away_score"
+    ]].copy()
+
     st_home = st.rename(columns={"home_team":"team","away_team":"opponent"})
     st_home["home_away"] = "HOME"
     st_home["points_for"] = st_home["home_score"]
@@ -229,10 +261,15 @@ def build_dataset(seasons=None, rolling_n=None):
 
     sched_team_rows = pd.concat([st_home, st_away], ignore_index=True)
     sched_team_rows = sched_team_rows.rename(columns={"gameday":"game_date"})
-    sched_team_rows["game_date"] = pd.to_datetime(sched_team_rows["game_date"], errors="coerce")
+    sched_team_rows["game_date"] = pd.to_datetime(
+        sched_team_rows["game_date"], errors="coerce"
+    )
 
     # join weekly aggregates
-    team_side = sched_team_rows.merge(tstats, on=["season","week","team"], how="left", validate="many_to_one")
+    team_side = sched_team_rows.merge(
+        tstats, on=["season","week","team"],
+        how="left", validate="many_to_one"
+    )
 
     # numeric fill
     for c in ["passing_yards","rushing_yards","turnovers"]:
@@ -245,12 +282,14 @@ def build_dataset(seasons=None, rolling_n=None):
         if not market.empty and "game_id" in market.columns:
             # expected columns: game_id, close_spread_home (fav negative), ml_home, ml_away, total_points
             m = market.copy()
-            # broadcast to team perspective
-            # for HOME rows: team_spread = close_spread_home ; for AWAY: team_spread = -close_spread_home
-            team_side = team_side.merge(m[["game_id","close_spread_home","ml_home","ml_away","total_points"]],
-                                        on="game_id", how="left")
+            team_side = team_side.merge(
+                m[["game_id","close_spread_home","ml_home","ml_away","total_points"]],
+                on="game_id", how="left"
+            )
             team_side["team_spread"] = np.where(
-                team_side["home_away"]=="HOME", team_side["close_spread_home"], -team_side["close_spread_home"]
+                team_side["home_away"]=="HOME",
+                team_side["close_spread_home"],
+                -team_side["close_spread_home"],
             )
             team_side["opp_spread_tmp"] = -team_side["team_spread"]
             # moneyline implied (raw)
@@ -264,7 +303,9 @@ def build_dataset(seasons=None, rolling_n=None):
                 _american_to_implied_prob(team_side["ml_away"]),
                 _american_to_implied_prob(team_side["ml_home"]),
             )
-            team_side["total_points"] = pd.to_numeric(team_side["total_points"], errors="coerce")
+            team_side["total_points"] = pd.to_numeric(
+                team_side["total_points"], errors="coerce"
+            )
         else:
             print("[build_dataset] market file missing or empty; skipping.")
 
@@ -274,8 +315,10 @@ def build_dataset(seasons=None, rolling_n=None):
         if not weather.empty and "game_id" in weather.columns:
             w = weather.copy()
             # expected columns: game_id, wind_mph, temp_f, is_precip, is_outdoor
-            team_side = team_side.merge(w[["game_id","wind_mph","temp_f","is_precip","is_outdoor"]],
-                                        on="game_id", how="left")
+            team_side = team_side.merge(
+                w[["game_id","wind_mph","temp_f","is_precip","is_outdoor"]],
+                on="game_id", how="left"
+            )
         else:
             print("[build_dataset] weather file missing or empty; skipping.")
 
@@ -305,7 +348,10 @@ def build_dataset(seasons=None, rolling_n=None):
 
     # Guarantee one row per (game_id, team)
     keys = ["game_id","team"]
-    num_cols = [c for c in ["passing_yards","rushing_yards","turnovers","points_for","points_against"] if c in team_side.columns]
+    num_cols = [
+        c for c in ["passing_yards","rushing_yards","turnovers","points_for","points_against"]
+        if c in team_side.columns
+    ]
     if num_cols:
         team_side = (
             team_side.sort_values(["season","week","team"])
@@ -316,20 +362,27 @@ def build_dataset(seasons=None, rolling_n=None):
     #  Simple Elo
     def _simple_elo(df):
         df = df.sort_values(["team","season","week"]).copy()
-        K = 20; base = 1500.0; elo = {}; ratings = []
+        K = 20
+        base = 1500.0
+        elo = {}
+        ratings = []
         for _, r in df.iterrows():
             t, opp = r["team"], r["opponent"]
-            Ra = elo.get(t, base); Rb = elo.get(opp, base)
+            Ra = elo.get(t, base)
+            Rb = elo.get(opp, base)
             Ea = 1.0 / (1 + 10 ** ((Rb - Ra)/400))
             win = 1.0 if r["points_for"] > r["points_against"] else 0.0
             Ra_new = Ra + K * (win - Ea)
-            elo[t] = Ra_new; ratings.append(Ra_new)
+            elo[t] = Ra_new
+            ratings.append(Ra_new)
         df["team_elo"] = ratings
         return df
 
     team_side = _simple_elo(team_side)
     team_side = team_side.merge(
-        team_side[["game_id","team","team_elo"]].rename(columns={"team":"opponent","team_elo":"opp_elo"}),
+        team_side[["game_id","team","team_elo"]].rename(
+            columns={"team":"opponent","team_elo":"opp_elo"}
+        ),
         on=["game_id","opponent"], how="left"
     )
     team_side["elo_diff"] = team_side["team_elo"] - team_side["opp_elo"]
@@ -340,7 +393,7 @@ def build_dataset(seasons=None, rolling_n=None):
     # Build stacked dataset
     dataset = make_matchups(team_side, sched)
 
-    # Fill early-week NaNs in rolling/new cols
+    # Fill early-week NaNs in rolling/new cols (safe per-column fill)
     roll_cols = [c for c in dataset.columns if c.endswith("_roll")]
     fill_cols = roll_cols + [
         "team_spread","opp_spread","team_ml_implied","opp_ml_implied","total_points",
@@ -349,8 +402,14 @@ def build_dataset(seasons=None, rolling_n=None):
         "opp_off_epa_roll","opp_def_epa_roll","opp_sr_off_roll","opp_sr_def_roll",
     ]
     present = [c for c in fill_cols if c in dataset.columns]
-    if present:
-        dataset[present] = dataset[present].fillna(dataset[present].median(numeric_only=True))
+
+    for col in present:
+        # only handle numeric columns
+        if pd.api.types.is_numeric_dtype(dataset[col]):
+            med = dataset[col].median()
+            if pd.isna(med):
+                continue
+            dataset[col] = dataset[col].fillna(med)
 
     dataset = dataset.dropna(subset=["team_win"])
     return dataset
