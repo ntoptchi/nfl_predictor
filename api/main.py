@@ -1,6 +1,7 @@
 import os, sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from .schemas import (PredictRequest, PredictResponse, GamePick,
                       BacktestRequest, BacktestResponse, BacktestRow,
@@ -19,6 +20,11 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/favicon.ico")
+def favicon():
+    # empty 1×1 – browsers stop retrying
+    return Response(content=b"", media_type="image/x-icon", status_code=200)
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
