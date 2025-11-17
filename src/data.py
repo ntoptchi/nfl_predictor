@@ -16,13 +16,9 @@ def _load_optional_csv(path, dtype=None, parse_dates=None):
 
 def _american_to_implied_prob(odds):
     # American odds → raw implied (no vig removal)
-    # +150 => 100/(150+100)=0.400 ; -150 => 150/(150+100)=0.600
     s = pd.to_numeric(odds, errors="coerce")
     pos = s.where(s > 0)
     neg = s.where(s < 0)
-    p = pd.Series(0.0, index=s.index if hasattr(s, "index") else None)
-    if hasattr(p, "where"):
-        p = p.where(False, np.nan)  # init
     p = np.where(
         pd.notnull(pos),
         100.0 / (pos + 100.0),
@@ -404,7 +400,6 @@ def build_dataset(seasons=None, rolling_n=None):
     present = [c for c in fill_cols if c in dataset.columns]
 
     for col in present:
-        # only handle numeric columns
         if pd.api.types.is_numeric_dtype(dataset[col]):
             med = dataset[col].median()
             if pd.isna(med):
