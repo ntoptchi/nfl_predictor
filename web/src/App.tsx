@@ -1,238 +1,157 @@
-// web/src/App.tsx
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
-type PickRow = {
-  game_id: string;
-  season: number;
-  week: number;
-  gameday: string;
-  home_team: string;
-  away_team: string;
-  predicted_winner: string;
-  confidence: number; // 0..1
+type Row = {
+  matchup: string;
+  pick: string;
+  prob: number; // 0–1
 };
 
-const API_BASE =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
+type ApiPayload = Record<string, any>;
 
-function clsConfidence(p: number) {
-  if (p >= 0.66) return "conf high";
-  if (p >= 0.55) return "conf mid";
-  return "conf low";
-}
+function coerceTables(payload: ApiPayload) {
+  // Accept a few possible shapes so we don't crash if the backend changes keys
+  const top = (payload.top_picks ?? payload.top ?? payload.top_confidence ?? []) as any[];
+  const all = (payload.all_picks ?? payload.all ?? payload.picks ?? []) as any[];
+  const flips = (payload.coin_flips ?? payload.flips ?? []) as any[];
 
-function ConfidenceCell({
-  p,
-  showBars,
-}: {
-  p: number;
-  showBars: boolean;
-}) {
-  const pct = (p * 100).toFixed(2) + "%";
+  // Normalize rows to (matchup, pick, prob)
+  const norm = (rows: any[]): Row[] =>
+    Array.isArray(rows)
+      ? rows.map((r) => ({
+          matchup:
+            r.matchup ??
+            r.Matchup ??
+            (r.away && r.home ? `${r.away} @ ${r.home}` : String(r.matchup ?? "")),
+          pick: r.pick ?? r.Pick ?? r.gameday_pick ?? r.predicted_winner ?? "",
+          prob: typeof r.confidence === "number"
+            ? r.confidence
+            : typeof r.probability === "number"
+            ? r.probability
+            : typeof r.Confidence === "number"
+            ? r.Confidence
+            : typeof r.prob === "number"
+            ? r.prob
+            : 0,
+        }))
+      : [];
 
-  if (!showBars) {
-    return <span className={clsConfidence(p)}>{pct}</span>;
-  }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <div className="bar-wrap">
-        <div
-          className="bar-fill"
-          style={{ width: `${Math.max(2, Math.min(100, p * 100))}%` }}
-        />
-      </div>
-      <span className={clsConfidence(p)} style={{ minWidth: 64 }}>
-        {pct}
-      </span>
-    </div>
-  );
+  return {
+    top: norm(top),
+    all: norm(all),
+    flips: norm(flips),
+  };
 }
 
 export default function App() {
   const [season, setSeason] = useState<number>(2025);
   const [week, setWeek] = useState<number>(1);
-  const [data, setData] = useState<PickRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showBars, setShowBars] = useState(true); // toggle
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
-  const [top, flips, all] = useMemo(() => {
-    const sorted = [...data].sort((a, b) => b.confidence - a.confidence);
-    const top = sorted.slice(0, 5);
-    const flips = sorted.filter(
-      (r) => r.confidence >= 0.48 && r.confidence <= 0.52
-    );
-    return [top, flips, sorted];
-  }, [data]);
+  const [top, setTop] = useState<Row[]>([]);
+  const [all, setAll] = useState<Row[]>([]);
+  const [flips, setFlips] = useState<Row[]>([]);
 
-  async function getPicks() {
-    setError("");
+  const getPicks = async () => {
     setLoading(true);
+    setError(null);
+
     try {
-      const res = await fetch(`${API_BASE}/predict`, {
+      // If you added a Vite proxy (below), call /api/predict.
+      // Otherwise, hit FastAPI directly.
+      const url = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+      const res = await fetch(`${url}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ season, week }),
+        body: JSON.stringify({ season: Number(season), week: Number(week) }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as PickRow[];
-      setData(json);
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`API ${res.status} ${res.statusText}: ${txt.slice(0, 200)}`);
+      }
+
+      const data = (await res.json()) as ApiPayload;
+      const tables = coerceTables(data);
+
+      setTop(tables.top);
+      setAll(tables.all);
+      setFlips(tables.flips);
     } catch (e: any) {
-      setError(`Failed to fetch picks: ${e?.message ?? e}`);
-      setData([]);
+      console.error(e);
+      setError(
+        "Failed to fetch picks. Make sure the API server is running (uvicorn on :8000) and try again."
+      );
+      // Clear old tables so the screen doesn't look stale
+      setTop([]);
+      setAll([]);
+      setFlips([]);
     } finally {
       setLoading(false);
     }
-  }
+  };
+
+  const Table = ({ title, rows }: { title: string; rows: Row[] }) => (
+    <section className="section">
+      <h2 className="h2">{title}</h2>
+      {rows.length === 0 ? (
+        <p className="muted">No rows.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Matchup</th>
+              <th>Gameday Pick</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td>{r.matchup}</td>
+                <td>{r.pick}</td>
+                <td>{(r.prob * 100).toFixed(2)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
 
   return (
-    <div className="container">
-      <h1>NFL Game Predictor</h1>
+    <div className="wrap">
+      <h1 className="h1">NFL Game Predictor</h1>
 
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <div className="controls">
-          <div>
-            <label className="label">Season</label>
-            <input
-              className="input"
-              type="number"
-              value={season}
-              onChange={(e) => setSeason(parseInt(e.target.value || "0", 10))}
-              placeholder="2025"
-            />
-          </div>
-          <div>
-            <label className="label">Week</label>
-            <input
-              className="input"
-              type="number"
-              value={week}
-              onChange={(e) => setWeek(parseInt(e.target.value || "0", 10))}
-              placeholder="1"
-            />
-          </div>
+      <p className="muted">Enter a season + week to get model picks and confidence.</p>
 
-          <button className="button" onClick={getPicks}>
-            {loading ? "Fetching…" : "Get Picks"}
-          </button>
-
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={showBars}
-              onChange={(e) => setShowBars(e.target.checked)}
-            />
-            Show probability bars
-          </label>
-        </div>
-
-        {error && (
-          <div className="mt-3" style={{ color: "#f87171" }}>
-            {error}
-          </div>
-        )}
-
-        {loading && <div className="spinner" />}
-
-        {!loading && data.length === 0 && (
-          <p className="mt-3 muted">
-            Enter a season & week, then click “Get Picks”.
-          </p>
-        )}
+      <div className="form">
+        <label>
+          Season
+          <input
+            type="number"
+            value={season}
+            onChange={(e) => setSeason(Number(e.target.value))}
+          />
+        </label>
+        <label>
+          Week
+          <input
+            type="number"
+            value={week}
+            onChange={(e) => setWeek(Number(e.target.value))}
+          />
+        </label>
+        <button onClick={getPicks} disabled={loading}>
+          {loading ? "Loading..." : "Get Picks"}
+        </button>
       </div>
 
-      {!loading && data.length > 0 && (
-        <>
-          <h2 className="mt-6">Top Confidence Picks</h2>
-          <div className="card">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Matchup</th>
-                  <th>Gameday</th>
-                  <th>Pick</th>
-                  <th>Confidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {top.map((r) => (
-                  <tr key={`top_${r.game_id}`}>
-                    <td>
-                      {r.away_team} @ {r.home_team}
-                    </td>
-                    <td>{r.gameday || "—"}</td>
-                    <td>{r.predicted_winner}</td>
-                    <td>
-                      <ConfidenceCell p={r.confidence} showBars={showBars} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {error && <div className="error">{error}</div>}
 
-          <h2 className="mt-6">All Picks</h2>
-          <div className="card">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Matchup</th>
-                  <th>Gameday</th>
-                  <th>Pick</th>
-                  <th>Confidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {all.map((r) => (
-                  <tr key={r.game_id}>
-                    <td>
-                      {r.away_team} @ {r.home_team}
-                    </td>
-                    <td>{r.gameday || "—"}</td>
-                    <td>{r.predicted_winner}</td>
-                    <td>
-                      <ConfidenceCell p={r.confidence} showBars={showBars} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <h2 className="mt-6">Coin Flips (low confidence)</h2>
-          <div className="card">
-            {flips.length === 0 ? (
-              <p className="muted">No coin flips this week.</p>
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Matchup</th>
-                    <th>Gameday</th>
-                    <th>Pick</th>
-                    <th>Confidence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {flips.map((r) => (
-                    <tr key={`flip_${r.game_id}`}>
-                      <td>
-                        {r.away_team} @ {r.home_team}
-                      </td>
-                      <td>{r.gameday || "—"}</td>
-                      <td>{r.predicted_winner}</td>
-                      <td>
-                        <ConfidenceCell p={r.confidence} showBars={showBars} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
-      )}
+      <Table title="Top Confidence Picks" rows={top} />
+      <Table title="All Picks" rows={all} />
+      <Table title="Coin Flips (low confidence)" rows={flips} />
     </div>
   );
 }
