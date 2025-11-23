@@ -9,12 +9,10 @@ type Row = {
 type ApiPayload = Record<string, any>;
 
 function coerceTables(payload: ApiPayload) {
-  // Accept a few possible shapes so we don't crash if the backend changes keys
   const top = (payload.top_picks ?? payload.top ?? payload.top_confidence ?? []) as any[];
   const all = (payload.all_picks ?? payload.all ?? payload.picks ?? []) as any[];
   const flips = (payload.coin_flips ?? payload.flips ?? []) as any[];
 
-  // Normalize rows to (matchup, pick, prob)
   const norm = (rows: any[]): Row[] =>
     Array.isArray(rows)
       ? rows.map((r) => ({
@@ -57,8 +55,6 @@ export default function App() {
     setError(null);
 
     try {
-      // If you added a Vite proxy (below), call /api/predict.
-      // Otherwise, hit FastAPI directly.
       const url = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
       const res = await fetch(`${url}/predict`, {
         method: "POST",
@@ -80,9 +76,8 @@ export default function App() {
     } catch (e: any) {
       console.error(e);
       setError(
-        "Failed to fetch picks. Make sure the API server is running (uvicorn on :8000) and try again."
+        "Failed to fetch picks. Make sure the API server is running on port 8000 and try again."
       );
-      // Clear old tables so the screen doesn't look stale
       setTop([]);
       setAll([]);
       setFlips([]);
@@ -92,66 +87,94 @@ export default function App() {
   };
 
   const Table = ({ title, rows }: { title: string; rows: Row[] }) => (
-    <section className="section">
-      <h2 className="h2">{title}</h2>
+    <div className="card">
+      <div className="card-header">
+        <h2 className="card-title">{title}</h2>
+      </div>
       {rows.length === 0 ? (
-        <p className="muted">No rows.</p>
+        <p className="muted">No games in this bucket.</p>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Matchup</th>
-              <th>Gameday Pick</th>
-              <th>Confidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>{r.matchup}</td>
-                <td>{r.pick}</td>
-                <td>{(r.prob * 100).toFixed(2)}%</td>
+        <div className="table-wrapper">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Matchup</th>
+                <th>Gameday Pick</th>
+                <th>Confidence</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.matchup}</td>
+                  <td>{r.pick}</td>
+                  <td>{(r.prob * 100).toFixed(2)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </section>
+    </div>
   );
 
   return (
-    <div className="wrap">
-      <h1 className="h1">NFL Game Predictor</h1>
+    <div className="page">
+      <header className="hero">
+        <h1 className="hero-title">NFL Game Predictor</h1>
+        <p className="hero-subtitle">
+          Ensemble model using historical stats to pick weekly winners and confidence.
+        </p>
+      </header>
 
-      <p className="muted">Enter a season + week to get model picks and confidence.</p>
+      <section className="card controls-card">
+        <div className="card-header">
+          <h2 className="card-title">Get Weekly Picks</h2>
+          <p className="card-subtitle">
+            Enter a season and week, then let the model crunch the numbers.
+          </p>
+        </div>
 
-      <div className="form">
-        <label>
-          Season
-          <input
-            type="number"
-            value={season}
-            onChange={(e) => setSeason(Number(e.target.value))}
-          />
-        </label>
-        <label>
-          Week
-          <input
-            type="number"
-            value={week}
-            onChange={(e) => setWeek(Number(e.target.value))}
-          />
-        </label>
-        <button onClick={getPicks} disabled={loading}>
-          {loading ? "Loading..." : "Get Picks"}
-        </button>
-      </div>
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="season">Season</label>
+            <input
+              id="season"
+              type="number"
+              value={season}
+              onChange={(e) => setSeason(Number(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="week">Week</label>
+            <input
+              id="week"
+              type="number"
+              value={week}
+              min={1}
+              max={22}
+              onChange={(e) => setWeek(Number(e.target.value))}
+            />
+          </div>
+          <button className="primary-btn" onClick={getPicks} disabled={loading}>
+            {loading ? "Loading..." : "Get Picks"}
+          </button>
+        </div>
 
-      {error && <div className="error">{error}</div>}
+        {error && <div className="error">{error}</div>}
 
-      <Table title="Top Confidence Picks" rows={top} />
-      <Table title="All Picks" rows={all} />
-      <Table title="Coin Flips (low confidence)" rows={flips} />
+        {!error && top.length === 0 && all.length === 0 && !loading && (
+          <p className="muted small">
+            Tip: start with a recent regular-season week (e.g. season 2024, week 5).
+          </p>
+        )}
+      </section>
+
+      <section className="grid">
+        <Table title="Top Confidence Picks" rows={top} />
+        <Table title="All Model Picks" rows={all} />
+        <Table title="Coin Flips (Low Confidence)" rows={flips} />
+      </section>
     </div>
   );
 }
