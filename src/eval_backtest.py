@@ -86,11 +86,11 @@ def main():
     os.makedirs("reports", exist_ok=True)
     res = backtest(span, args.rolling_n)
 
-    # Save CSV
+    # Save to CSV
     res.to_csv(args.out_csv, index=False)
     print(f"Wrote {args.out_csv}")
 
-    # Save Markdown
+    # Save to Markdown
     md = ["# Rolling-Origin Backtest",
           f"Seasons: {span[0]}–{span[-1]} | Rolling N={args.rolling_n}",
           "",
