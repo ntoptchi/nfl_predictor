@@ -237,7 +237,8 @@ def build_dataset(seasons=None, rolling_n=None):
 
     # schedule + base stats
     sched = load_games(seasons)
-    tstats = team_game_stats(seasons)
+    stats_seasons = [s for s in seasons if s <= Config.HOLDOUT_SEASON]
+    tstats = team_game_stats(stats_seasons)
 
     # schedule-derived per-team rows
     st = sched[[
