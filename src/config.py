@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-
+import os
 @dataclass
 class Config:
-    SEASONS = list(range(2015, 2025)) #inclusive start
+    SEASONS = list(range(2018, 2025)) #inclusive start
     CURRENT_SEASON = 2025
     HOLDOUT_SEASON = 2024
     ROLLING_N = 5
@@ -12,6 +12,7 @@ class Config:
     PREP_PATH = "artifacts/prep.joblib" # scalers/encoders/etc
     CALIBRATE = True
     CALIBRATION_METHOD = "isotonic"
+    DATA_DIR = "data"
     USE_MARKET   = True
     USE_WEATHER  = True
     USE_QB       = True
@@ -20,6 +21,14 @@ class Config:
     FILE_WEATHER = "weather.csv"            # by game_id
     FILE_QB      = "qb_status.csv"          # by season/week/team
     FILE_EPA     = "team_epa.csv"
+    TUNE_TRIALS = 40            # try 40–200 depending on patience
+    TUNE_TIMEOUT = None         # seconds; set to e.g. 1800 to cap
+    TUNE_MIN_SEASONS = 5        # guard against tiny datasets
+    BEST_PARAMS_PATH = "artifacts/best_params.json"
+
+    ODDS_API_KEY    = os.getenv("ODDS_API_KEY",    "") #put your API key here
+   
+
     FEATURES = [
         #rolling means
         "team_pf_roll", "team_pa_roll", "team_pass_y_roll", "team_rush_y_roll", "team_to_roll",
